@@ -20,6 +20,9 @@
 #import <Cocoa/Cocoa.h>
 
 #include <sys/stat.h>
+#include <unistd.h>
+#include <Security/Authorization.h>
+#include <Security/AuthorizationTags.h>
 
 char *addfiletopath(const char *path, const char *filename)
 {

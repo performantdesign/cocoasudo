@@ -147,7 +147,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				ARCHS = "$(ARCHS_STANDARD_32_BIT)";
 				COPY_PHASE_STRIP = NO;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_ENABLE_FIX_AND_CONTINUE = YES;
@@ -157,7 +157,7 @@
 				GCC_PREFIX_HEADER = cocoasudo_Prefix.pch;
 				INSTALL_PATH = /usr/local/bin;
 				PRODUCT_NAME = cocoasudo;
-				SDKROOT = macosx10.5;
+				SDKROOT = macosx10.4;
 			};
 			name = Debug;
 		};
@@ -165,14 +165,14 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				ARCHS = "$(ARCHS_STANDARD_32_BIT)";
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_MODEL_TUNING = G5;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = cocoasudo_Prefix.pch;
 				INSTALL_PATH = /usr/local/bin;
 				PRODUCT_NAME = cocoasudo;
-				SDKROOT = macosx10.5;
+				SDKROOT = macosx10.4;
 			};
 			name = Release;
 		};
