@@ -19,6 +19,185 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <sys/stat.h>
+
+char *addfiletopath(const char *path, const char *filename)
+{
+	char *outbuf;
+	char *lc;
+
+	lc = (char *)path + strlen(path) - 1;
+	if (lc < path || *lc != '/')
+	{
+		lc = NULL;
+	}
+	while (*filename == '/')
+	{
+		filename++;
+	}
+	outbuf = malloc(strlen(path) + strlen(filename) + 1 + (lc == NULL ? 1 : 0));
+	sprintf(outbuf, "%s%s%s", path, (lc == NULL) ? "/" : "", filename);
+	
+	return outbuf;
+}
+
+int isexecfile(const char *name)
+{
+	struct stat s;
+	return (!access(name, X_OK) && !stat(name, &s) && S_ISREG(s.st_mode));
+}
+
+char *which(const char *filename)
+{
+	char *path, *p, *n;
+	
+	path = getenv("PATH");
+	if (!path)
+	{
+		return NULL;
+	}
+
+	p = path = strdup(path);
+	while (p) {
+		n = strchr(p, ':');
+		if (n)
+		{
+			*n++ = '\0';
+		}
+		if (*p != '\0')
+		{
+			p = addfiletopath(p, filename);
+			if (isexecfile(p))
+			{
+				free(path);
+				return p;
+			}
+			free(p);
+		}
+		p = n;
+	}
+	free(path);
+	return NULL;
+}
+
+int cocoasudo(char *executable, char *commandArgs[], char *icon, char *prompt)
+{
+	int retVal = 1;
+	
+	OSStatus status;
+	AuthorizationRef authRef;
+	
+	AuthorizationItem right = { "com.performant.cocoasudo", 0, NULL, 0 };
+	AuthorizationRights rightSet = { 1, &right };
+	
+	AuthorizationEnvironment myAuthorizationEnvironment;
+	AuthorizationItem kAuthEnv[2];
+	myAuthorizationEnvironment.items = kAuthEnv;
+	
+	if (prompt && icon)
+	{
+		kAuthEnv[0].name = kAuthorizationEnvironmentPrompt;
+		kAuthEnv[0].valueLength = strlen(prompt);
+		kAuthEnv[0].value = prompt;
+		kAuthEnv[0].flags = 0;
+		
+		kAuthEnv[1].name = kAuthorizationEnvironmentIcon;
+		kAuthEnv[1].valueLength = strlen(icon);
+		kAuthEnv[1].value = icon;
+		kAuthEnv[1].flags = 0;
+		
+		myAuthorizationEnvironment.count = 2;
+	}
+	else if (prompt)
+	{
+		kAuthEnv[0].name = kAuthorizationEnvironmentPrompt;
+		kAuthEnv[0].valueLength = strlen(prompt);
+		kAuthEnv[0].value = prompt;
+		kAuthEnv[0].flags = 0;
+		
+		myAuthorizationEnvironment.count = 1;
+	}
+	else if (icon)
+	{
+		kAuthEnv[0].name = kAuthorizationEnvironmentIcon;
+		kAuthEnv[0].valueLength = strlen(icon);
+		kAuthEnv[0].value = icon;
+		kAuthEnv[0].flags = 0;
+		
+		myAuthorizationEnvironment.count = 1;
+	}
+	else
+	{
+		myAuthorizationEnvironment.count = 0;
+	}
+	
+	if (AuthorizationCreate(NULL, &myAuthorizationEnvironment/*kAuthorizationEmptyEnvironment*/, kAuthorizationFlagDefaults, &authRef) != errAuthorizationSuccess)
+	{
+		NSLog(@"Could not create authorization reference object.");
+		status = errAuthorizationBadAddress;
+	}
+	else
+	{
+		status = AuthorizationCopyRights(authRef, &rightSet, &myAuthorizationEnvironment/*kAuthorizationEmptyEnvironment*/, 
+										 kAuthorizationFlagDefaults | kAuthorizationFlagPreAuthorize
+										 | kAuthorizationFlagInteractionAllowed | kAuthorizationFlagExtendRights,
+										 NULL);
+	}
+
+	if (status == errAuthorizationSuccess)
+	{
+		FILE *ioPipe;
+		char buffer[1024];
+		int bytesRead;
+
+		status = AuthorizationExecuteWithPrivileges(authRef, executable, 0, commandArgs, &ioPipe);
+
+		/* Just pipe processes' stdout to our stdout for now; hopefully can add stdin pipe later as well */
+		for (;;)
+		{
+			bytesRead = fread(buffer, sizeof(char), 1024, ioPipe);
+			if (bytesRead < 1) break;
+			write(STDOUT_FILENO, buffer, bytesRead * sizeof(char));
+		}
+		
+		pid_t pid;
+		int pidStatus;
+		do {
+			pid = wait(&pidStatus);
+		} while (pid != -1);
+		
+		if (status == errAuthorizationSuccess)
+		{
+			retVal = 0;
+		}
+	}
+	else
+	{
+		AuthorizationFree(authRef, kAuthorizationFlagDestroyRights);
+		authRef = NULL;
+		if (status != errAuthorizationCanceled)
+		{
+			// pre-auth failed
+			NSLog(@"Pre-auth failed");
+		}
+	}
+	
+	return retVal;
+}
+
+void usage(char *appNameFull)
+{
+	char *appName = strrchr(appNameFull, '/');
+	if (appName == NULL)
+	{
+		appName = appNameFull;
+	}
+	else {
+		appName++;
+	}
+	fprintf(stderr, "usage: %s [--icon=icon.tiff] [--prompt=prompt...] command\n  --icon=[filename]: optional argument to specify a custom icon\n  --prompt=[prompt]: optional argument to specify a custom prompt\n", appName);
+}
+
 int main(int argc, char *argv[])
 {
 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
@@ -51,89 +230,36 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	OSStatus status;
-	AuthorizationRef authRef;
-	
-	AuthorizationItem right = { "com.performant.cocoasudo", 0, NULL, 0 };
-	AuthorizationRights rightSet = { 1, &right };
-	
-	AuthorizationEnvironment myAuthorizationEnvironment;
-	AuthorizationItem kAuthEnv[2];
-	myAuthorizationEnvironment.items = kAuthEnv;
-
-	if (prompt && icon)
+	if (programArgsStartAt >= argc)
 	{
-		kAuthEnv[0].name = kAuthorizationEnvironmentPrompt;
-		kAuthEnv[0].valueLength = strlen(prompt);
-		kAuthEnv[0].value = prompt;
-		kAuthEnv[0].flags = 0;
-
-		kAuthEnv[1].name = kAuthorizationEnvironmentIcon;
-		kAuthEnv[1].valueLength = strlen(icon);
-		kAuthEnv[1].value = icon;
-		kAuthEnv[1].flags = 0;
-		
-		myAuthorizationEnvironment.count = 2;
-	}
-	else if (prompt)
-	{
-		kAuthEnv[0].name = kAuthorizationEnvironmentPrompt;
-		kAuthEnv[0].valueLength = strlen(prompt);
-		kAuthEnv[0].value = prompt;
-		kAuthEnv[0].flags = 0;
-		
-		myAuthorizationEnvironment.count = 1;
-	}
-	else if (icon)
-	{
-		kAuthEnv[0].name = kAuthorizationEnvironmentIcon;
-		kAuthEnv[0].valueLength = strlen(icon);
-		kAuthEnv[0].value = icon;
-		kAuthEnv[0].flags = 0;
-
-		myAuthorizationEnvironment.count = 1;
+		usage(argv[0]);
 	}
 	else
 	{
-		myAuthorizationEnvironment.count = 0;
-	}
+		char *executable;
 
-	if (AuthorizationCreate(NULL, &myAuthorizationEnvironment/*kAuthorizationEmptyEnvironment*/, kAuthorizationFlagDefaults, &authRef) != errAuthorizationSuccess)
-	{
-		NSLog(@"Could not create authorization reference object.");
-		status = errAuthorizationBadAddress;
-	}
-	else
-	{
-		status = AuthorizationCopyRights(authRef, &rightSet, &myAuthorizationEnvironment/*kAuthorizationEmptyEnvironment*/, 
-										 kAuthorizationFlagDefaults | kAuthorizationFlagPreAuthorize
-										 | kAuthorizationFlagInteractionAllowed | kAuthorizationFlagExtendRights,
-										 NULL);
-	}
-	
-	if (status == errAuthorizationSuccess)
-	{
-		status = AuthorizationExecuteWithPrivileges(authRef, argv[programArgsStartAt], 0, argv + programArgsStartAt + 1, NULL);
-		
-		pid_t pid;
-		int pidStatus;
-		do {
-			pid = wait(&pidStatus);
-		} while (pid != -1);
-		
-		if (status == errAuthorizationSuccess)
+		if (strchr(argv[programArgsStartAt], '/'))
 		{
-			retVal = 0;
+			executable = isexecfile(argv[programArgsStartAt]) ? strdup(argv[programArgsStartAt]) : NULL;
 		}
-	}
-	else
-	{
-		AuthorizationFree(authRef, kAuthorizationFlagDestroyRights);
-		authRef = NULL;
-		if (status != errAuthorizationCanceled)
+		else
 		{
-			// pre-auth failed
-			NSLog(@"Pre-auth failed");
+			executable = which(argv[programArgsStartAt]);
+		}
+
+		if (executable)
+		{
+			char **commandArgs = malloc((argc - programArgsStartAt) * sizeof(char**));
+			memcpy(commandArgs, argv + programArgsStartAt + 1, (argc - programArgsStartAt - 1) * sizeof(char**));
+			commandArgs[argc - programArgsStartAt - 1] = NULL;
+			retVal = cocoasudo(executable, commandArgs, icon, prompt);
+			free(commandArgs);
+			free(executable);
+		}
+		else
+		{
+			fprintf(stderr, "Unable to find %s\n", argv[programArgsStartAt]);
+			usage(argv[0]);
 		}
 	}
 
